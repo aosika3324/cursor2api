@@ -143,6 +143,14 @@ export interface CursorAccount {
     cooldownUntil?: string;
     /** 最近一次被自动禁用/冷却的原因（排障用） */
     lastErrorReason?: string;
+
+    // —— 健康探测（S1，旁路，不影响调度）——
+    /** 最近一次主动探测时间（RFC3339） */
+    lastProbeAt?: string;
+    /** 最近一次探测往返延迟（ms） */
+    lastProbeLatencyMs?: number;
+    /** 最近一次探测是否成功 */
+    lastProbeOk?: boolean;
 }
 
 /**
@@ -184,6 +192,22 @@ export interface ClientKey {
 export interface Group {
     id: string;
     name: string;
+    createdAt: string;
+}
+
+/**
+ * 代理池条目（S3）—— 独立于账号管理，存于 proxies.json。
+ * 可批量添加、健康探测、轮询分配到账号的 proxy 字段。
+ */
+export interface ProxyEntry {
+    id: string;
+    /** 代理 URL，如 http://user:pass@host:port 或 socks5://host:port */
+    url: string;
+    enabled: boolean;
+    health: 'unknown' | 'healthy' | 'unhealthy';
+    latencyMs?: number;
+    lastCheckedAt?: string;
+    note?: string;
     createdAt: string;
 }
 

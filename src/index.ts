@@ -20,6 +20,7 @@ import { loadAccounts, accountCount } from './accounts/account.js';
 import { loadClientKeys, clientKeyCount, findByKey, recordUsage } from './keys/client-key.js';
 import { runWithContext } from './request-context.js';
 import { loadGroups, groupCount } from './groups/group.js';
+import { loadProxies, proxyCount } from './proxies/proxy.js';
 import { createAdminRouter } from './admin/admin-api.js';
 
 // 从 package.json 读取版本号，统一来源，避免多处硬编码
@@ -204,6 +205,9 @@ setUsageSink(recordUsage);
 // ★ 加载账号分组（P4）
 loadGroups();
 
+// ★ 加载代理池（S3）
+loadProxies();
+
 app.listen(config.port, () => {
     const auth = config.authTokens?.length ? `${config.authTokens.length} token(s)` : 'open';
     const logParts: string[] = [];
@@ -240,6 +244,7 @@ app.listen(config.port, () => {
     const keyInfo = clientKeyCount() > 0 ? `${clientKeyCount()} client key(s)` : '未配置';
     console.log(`  ├─ Keys:    ${keyInfo}`);
     if (groupCount() > 0) console.log(`  ├─ Groups:  ${groupCount()} 组`);
+    if (proxyCount() > 0) console.log(`  ├─ Proxies: ${proxyCount()} 个`);
     console.log(`  ├─ Tools:   ${toolsInfo}`);
     console.log(`  ├─ Logging: ${logPersist}`);
     console.log(`  └─ Logs:    \x1b[35mhttp://localhost:${config.port}/logs\x1b[0m`);

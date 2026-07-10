@@ -21,7 +21,8 @@
     "test:account-scheduler": "node test/unit-account-scheduler.mjs",
     "test:client-key": "node test/unit-client-key.mjs",
     "test:group-cascade": "node test/unit-group-cascade.mjs",
-    "test:all": "node test/unit-tolerant-parse.mjs && node test/unit-tool-fixer.mjs && node test/unit-openai-compat.mjs && node test/unit-proxy-agent.mjs && node test/unit-image-paths.mjs && node test/unit-vision.mjs && node test/unit-openai-chat-input.mjs && node test/unit-openai-image-file.mjs && node test/unit-handler-truncation.mjs && node test/unit-openai-stream-truncation.mjs && node test/unit-account-scheduler.mjs && node test/unit-client-key.mjs && node test/unit-group-cascade.mjs",
+    "test:proxy-pool": "node test/unit-proxy-pool.mjs",
+    "test:all": "node test/unit-tolerant-parse.mjs && node test/unit-tool-fixer.mjs && node test/unit-openai-compat.mjs && node test/unit-proxy-agent.mjs && node test/unit-image-paths.mjs && node test/unit-vision.mjs && node test/unit-openai-chat-input.mjs && node test/unit-openai-image-file.mjs && node test/unit-handler-truncation.mjs && node test/unit-openai-stream-truncation.mjs && node test/unit-account-scheduler.mjs && node test/unit-client-key.mjs && node test/unit-group-cascade.mjs && node test/unit-proxy-pool.mjs",
     "test:stealth": "node stealth-proxy/test-challenge.js",
     "test:e2e": "node test/e2e-chat.mjs",
     "test:agentic": "node test/e2e-agentic.mjs"

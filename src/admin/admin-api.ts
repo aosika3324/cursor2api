@@ -17,7 +17,7 @@ import type { Request, Response } from 'express';
 import type { CursorAccount, ClientKey } from '../types.js';
 import {
     listAccounts, getAccount, addAccount, updateAccount, deleteAccount,
-    setDisabled as setAccountDisabled, clearCooldown,
+    setDisabled as setAccountDisabled, clearCooldown, resetStats,
 } from '../accounts/account.js';
 import { poolStatus } from '../accounts/scheduler.js';
 import {
@@ -25,9 +25,15 @@ import {
     setDisabled as setKeyDisabled,
 } from '../keys/client-key.js';
 import { listGroups, addGroup, renameGroup, deleteGroup } from '../groups/group.js';
-import { isDbInitialized, dbGetSummaries, dbGetStats } from '../logger-db.js';
+import {
+    listProxies, addProxy, batchAddProxies, deleteProxy, setProxyEnabled,
+    checkProxy, checkAllProxies, assignRoundRobin,
+} from '../proxies/proxy.js';
+import { isDbInitialized, dbGetStats } from '../logger-db.js';
+import { getRequestSummariesPage, getRequestPayload } from '../logger.js';
 import { apiGetConfig, apiSaveConfig } from '../config-api.js';
 import { adminAuth } from './admin-auth.js';
+import { probeAccount, probeAccounts, probeSystem } from './health.js';
 
 // ==================== 脱敏 ====================
 
@@ -61,6 +67,7 @@ export function createAdminRouter(): Router {
     registerAccountRoutes(r);
     registerClientKeyRoutes(r);
     registerGroupRoutes(r);
+    registerProxyRoutes(r);
     registerMiscRoutes(r);
     return r;
 }
@@ -111,6 +118,76 @@ function registerAccountRoutes(r: Router): void {
         const a = clearCooldown(req.params.id as string);
         if (!a) { res.status(404).json({ error: { message: '账号不存在', type: 'not_found' } }); return; }
         res.json({ account: redactAccount(a) });
+    });
+
+    // 单账号健康探测
+    r.post('/accounts/:id/health', async (req: Request, res: Response) => {
+        const a = getAccount(req.params.id as string);
+        if (!a) { res.status(404).json({ error: { message: '账号不存在', type: 'not_found' } }); return; }
+        const result = await probeAccount(a);
+        res.json({ result });
+    });
+
+    // 批量健康探测（body.ids 为空则探测全部）
+    r.post('/accounts/batch-health', async (req: Request, res: Response) => {
+        const ids = (req.body as { ids?: string[] }).ids;
+        const all = listAccounts();
+        const targets = Array.isArray(ids) && ids.length > 0 ? all.filter(a => ids.includes(a.id)) : all;
+        const results = await probeAccounts(targets);
+        res.json({ results, probed: results.length });
+    });
+
+    // 批量导入：多行文本，每行一个 cookie（可统一 group/priority/proxy）
+    // 行格式：整行即 cookie；或 "名称|cookie" 用竖线指定名称。空行/#注释忽略。
+    r.post('/accounts/batch-import', (req: Request, res: Response) => {
+        const b = req.body as { text?: string; group?: string; priority?: number; proxy?: string };
+        if (!b.text || typeof b.text !== 'string') {
+            res.status(400).json({ error: { message: 'text 必填（多行 cookie）', type: 'validation_error' } });
+            return;
+        }
+        const lines = b.text.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+        const created: Array<Record<string, unknown>> = [];
+        for (const line of lines) {
+            let name: string | undefined;
+            let cookie = line;
+            const pipe = line.indexOf('|');
+            if (pipe > 0) { name = line.slice(0, pipe).trim(); cookie = line.slice(pipe + 1).trim(); }
+            if (!cookie) continue;
+            const a = addAccount({ name, cookie, group: b.group, priority: b.priority, proxy: b.proxy });
+            created.push(redactAccount(a));
+        }
+        res.status(201).json({ imported: created.length, accounts: created });
+    });
+
+    // 批量编辑：对 ids 统一应用 patch（group/proxy/disabled/priority）
+    // 用 POST /batch-update 而非 PATCH /batch，避免被 PATCH /accounts/:id 捕获
+    r.post('/accounts/batch-update', (req: Request, res: Response) => {
+        const b = req.body as { ids?: string[]; patch?: Record<string, unknown> };
+        if (!Array.isArray(b.ids) || !b.patch) {
+            res.status(400).json({ error: { message: 'ids[] 与 patch 必填', type: 'validation_error' } });
+            return;
+        }
+        let updated = 0;
+        for (const id of b.ids) { if (updateAccount(id, b.patch as never)) updated++; }
+        res.json({ updated });
+    });
+
+    // 批量删除
+    r.post('/accounts/batch-delete', (req: Request, res: Response) => {
+        const ids = (req.body as { ids?: string[] }).ids;
+        if (!Array.isArray(ids)) { res.status(400).json({ error: { message: 'ids[] 必填', type: 'validation_error' } }); return; }
+        let deleted = 0;
+        for (const id of ids) { if (deleteAccount(id)) deleted++; }
+        res.json({ deleted });
+    });
+
+    // 批量重置（清零用量/失败/冷却）；ids 为空则全部
+    r.post('/accounts/batch-reset', (req: Request, res: Response) => {
+        const ids = (req.body as { ids?: string[] }).ids;
+        const targets = Array.isArray(ids) && ids.length > 0 ? ids : listAccounts().map(a => a.id);
+        let reset = 0;
+        for (const id of targets) { if (resetStats(id)) reset++; }
+        res.json({ reset });
     });
 }
 
@@ -192,6 +269,65 @@ function registerGroupRoutes(r: Router): void {
     });
 }
 
+// ==================== proxies ====================
+
+function registerProxyRoutes(r: Router): void {
+    r.get('/proxies', (_req: Request, res: Response) => {
+        res.json({ proxies: listProxies() });
+    });
+
+    r.post('/proxies', (req: Request, res: Response) => {
+        const url = (req.body as { url?: string }).url;
+        if (!url || typeof url !== 'string') {
+            res.status(400).json({ error: { message: 'url 必填', type: 'validation_error' } });
+            return;
+        }
+        res.status(201).json({ proxy: addProxy({ url, note: (req.body as { note?: string }).note }) });
+    });
+
+    // 批量添加（多行 URL）
+    r.post('/proxies/batch', (req: Request, res: Response) => {
+        const text = (req.body as { text?: string }).text;
+        if (!text || typeof text !== 'string') {
+            res.status(400).json({ error: { message: 'text 必填（多行 URL）', type: 'validation_error' } });
+            return;
+        }
+        const added = batchAddProxies(text);
+        res.status(201).json({ added: added.length, proxies: added });
+    });
+
+    // 并发探测全部（放在 :id 之前，避免 check-all 被当成 id）
+    r.post('/proxies/check-all', async (_req: Request, res: Response) => {
+        const proxies = await checkAllProxies();
+        res.json({ proxies, checked: proxies.length });
+    });
+
+    // 轮询分配到账号
+    r.post('/proxies/assign-round-robin', (req: Request, res: Response) => {
+        const ids = (req.body as { accountIds?: string[] }).accountIds;
+        res.json(assignRoundRobin(ids));
+    });
+
+    r.delete('/proxies/:id', (req: Request, res: Response) => {
+        const ok = deleteProxy(req.params.id as string);
+        if (!ok) { res.status(404).json({ error: { message: '代理不存在', type: 'not_found' } }); return; }
+        res.json({ ok: true });
+    });
+
+    r.post('/proxies/:id/enabled', (req: Request, res: Response) => {
+        const enabled = (req.body as { enabled?: boolean }).enabled === true;
+        const p = setProxyEnabled(req.params.id as string, enabled);
+        if (!p) { res.status(404).json({ error: { message: '代理不存在', type: 'not_found' } }); return; }
+        res.json({ proxy: p });
+    });
+
+    r.post('/proxies/:id/check', async (req: Request, res: Response) => {
+        const p = await checkProxy(req.params.id as string);
+        if (!p) { res.status(404).json({ error: { message: '代理不存在', type: 'not_found' } }); return; }
+        res.json({ proxy: p });
+    });
+}
+
 // ==================== config / stats / traces ====================
 
 function registerMiscRoutes(r: Router): void {
@@ -206,21 +342,39 @@ function registerMiscRoutes(r: Router): void {
         res.json({ pool, db });
     });
 
-    // 链路追踪：按 account/key/status 过滤（需启用 SQLite）
-    r.get('/traces', (req: Request, res: Response) => {
-        if (!isDbInitialized()) {
-            res.status(400).json({ error: { message: '链路追踪需启用 SQLite（logging.db_enabled）', type: 'db_disabled' } });
-            return;
-        }
+    // 系统健康探测：stealth 就绪 + 上游可达 + 池概览
+    r.get('/health/system', async (_req: Request, res: Response) => {
+        const health = await probeSystem();
+        res.json(health);
+    });
+
+    // 日志（合并链路追踪+用量）：分页 + 状态/关键字/账号/Key 过滤 + 用量小计
+    // SQLite 启用时走 DB 全量翻页；否则回退内存（近段历史）。
+    r.get('/logs', (req: Request, res: Response) => {
         const q = req.query;
-        const limit = Math.min(Math.max(parseInt(String(q.limit ?? '50'), 10) || 50, 1), 500);
-        const traces = dbGetSummaries({
+        const limit = Math.min(Math.max(parseInt(String(q.limit ?? '50'), 10) || 50, 1), 200);
+        const page = getRequestSummariesPage({
             limit,
-            accountId: typeof q.account_id === 'string' ? q.account_id : undefined,
-            clientKeyId: typeof q.client_key_id === 'string' ? q.client_key_id : undefined,
+            before: q.before ? Number(q.before) : undefined,
             status: typeof q.status === 'string' ? q.status : undefined,
             keyword: typeof q.keyword === 'string' ? q.keyword : undefined,
+            since: q.since ? Number(q.since) : undefined,
+            accountId: typeof q.account_id === 'string' ? q.account_id : undefined,
+            clientKeyId: typeof q.client_key_id === 'string' ? q.client_key_id : undefined,
         });
-        res.json({ traces, count: traces.length });
+        // 当前页用量小计
+        const usage = page.summaries.reduce((acc, s) => {
+            acc.inputTokens += s.inputTokens || 0;
+            acc.outputTokens += s.outputTokens || 0;
+            return acc;
+        }, { inputTokens: 0, outputTokens: 0 });
+        res.json({ ...page, usage, dbEnabled: isDbInitialized() });
+    });
+
+    // 单条请求完整 payload（点击展开）
+    r.get('/logs/:requestId', (req: Request, res: Response) => {
+        const payload = getRequestPayload(req.params.requestId as string);
+        if (!payload) { res.status(404).json({ error: { message: '日志不存在或已清理', type: 'not_found' } }); return; }
+        res.json({ payload });
     });
 }

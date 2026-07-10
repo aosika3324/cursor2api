@@ -41,6 +41,8 @@ client-keys.json
 client-keys.json.tmp
 groups.json
 groups.json.tmp
+proxies.json
+proxies.json.tmp
 
 # Database
 *.db

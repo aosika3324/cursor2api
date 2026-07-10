@@ -73,6 +73,9 @@ function normalize(a: Partial<CursorAccount>): CursorAccount {
         consecutiveFailures: a.consecutiveFailures || 0,
         cooldownUntil: a.cooldownUntil,
         lastErrorReason: a.lastErrorReason,
+        lastProbeAt: a.lastProbeAt,
+        lastProbeLatencyMs: a.lastProbeLatencyMs,
+        lastProbeOk: a.lastProbeOk,
     };
 }
 
@@ -196,6 +199,21 @@ export function clearCooldown(id: string): CursorAccount | undefined {
     return { ...a };
 }
 
+/** 重置统计：清零用量 + 失败计数 + 冷却（Admin 批量重置用） */
+export function resetStats(id: string): CursorAccount | undefined {
+    if (!loaded) loadAccounts();
+    const a = accounts.find(x => x.id === id);
+    if (!a) return undefined;
+    a.totalCalls = 0;
+    a.totalInputTokens = 0;
+    a.totalOutputTokens = 0;
+    a.consecutiveFailures = 0;
+    a.cooldownUntil = undefined;
+    a.lastErrorReason = undefined;
+    saveNow();
+    return { ...a };
+}
+
 // ==================== 运行时状态（高频，去抖落盘） ====================
 
 /** 调用成功：清零失败计数、累计用量、更新最近使用时间 */
@@ -211,6 +229,23 @@ export function recordSuccess(
     a.totalInputTokens += tokens?.inputTokens || 0;
     a.totalOutputTokens += tokens?.outputTokens || 0;
     a.lastUsedAt = nowIso();
+    saveDebounced();
+}
+
+/**
+ * 记录一次主动健康探测结果（旁路，不动调度/冷却状态，只更新展示字段）。
+ * 探测限流(429/403)可选地写入冷却，交由调用方决定是否传 cooldownOnRateLimit。
+ */
+export function recordProbe(
+    id: string,
+    result: { ok: boolean; latencyMs?: number; rateLimited?: boolean; reason?: string },
+): void {
+    const a = accounts.find(x => x.id === id);
+    if (!a) return;
+    a.lastProbeAt = nowIso();
+    a.lastProbeOk = result.ok;
+    a.lastProbeLatencyMs = result.latencyMs;
+    if (!result.ok && result.reason) a.lastErrorReason = result.reason.slice(0, 200);
     saveDebounced();
 }
 

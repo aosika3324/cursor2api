@@ -819,19 +819,21 @@ export function getRequestSummariesPage(opts: {
     status?: string;
     keyword?: string;
     since?: number;
+    accountId?: string;
+    clientKeyId?: string;
 }): { summaries: RequestSummary[]; hasMore: boolean; total: number; statusCounts: Record<string, number> } {
-    const { limit, before, status, keyword, since } = opts;
+    const { limit, before, status, keyword, since, accountId, clientKeyId } = opts;
     const cfg = getConfig();
 
     if (cfg.logging?.db_enabled) {
-        // SQLite 支持完整历史翻页 + 后端过滤
+        // SQLite 支持完整历史翻页 + 后端过滤（含 account_id/client_key_id 索引列）
         try {
-            const summaries = dbGetSummaries({ limit: limit + 1, before, status, keyword, since }) as RequestSummary[];
+            const summaries = dbGetSummaries({ limit: limit + 1, before, status, keyword, since, accountId, clientKeyId }) as RequestSummary[];
             const hasMore = summaries.length > limit;
             return {
                 summaries: hasMore ? summaries.slice(0, limit) : summaries,
                 hasMore,
-                total: dbCountSummaries({ since, status, keyword }),
+                total: dbCountSummaries({ since, status, keyword, accountId, clientKeyId }),
                 statusCounts: dbGetStatusCounts({ keyword, since }),
             };
         } catch (e) {
