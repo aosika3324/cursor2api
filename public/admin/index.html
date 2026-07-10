@@ -5,16 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Cursor2API · 管理后台</title>
 <style>
-:root{--bg:#f4f6fb;--card:#fff;--bd:#e2e8f0;--fg:#1e293b;--mut:#64748b;--pri:#3b82f6;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
+:root{--bg:#f4f6fb;--card:#fff;--bd:#e2e8f0;--fg:#1e293b;--mut:#64748b;--pri:#3b82f6;--ok:#16a34a;--warn:#d97706;--err:#dc2626;--inp:#fff;--hd:#f8fafc}
+:root[data-theme=dark]{--bg:#0f172a;--card:#1e293b;--bd:#334155;--fg:#e2e8f0;--mut:#94a3b8;--pri:#60a5fa;--ok:#4ade80;--warn:#fbbf24;--err:#f87171;--inp:#0f172a;--hd:#172033}
 *{box-sizing:border-box}
 body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);font-size:14px}
-button{font-family:inherit;cursor:pointer;border:1px solid var(--bd);background:#fff;border-radius:8px;padding:7px 13px;font-size:13px;color:var(--fg);transition:all .15s}
+button{font-family:inherit;cursor:pointer;border:1px solid var(--bd);background:var(--card);border-radius:8px;padding:7px 13px;font-size:13px;color:var(--fg);transition:all .15s}
 button:hover{border-color:var(--pri);color:var(--pri)}
 button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
 button.pri:hover{opacity:.9;color:#fff}
 button.danger{color:var(--err);border-color:#fecaca}
 button.danger:hover{background:var(--err);color:#fff;border-color:var(--err)}
-input,select{font-family:inherit;padding:8px 11px;border:1px solid var(--bd);border-radius:8px;font-size:13px;background:#fff;color:var(--fg);outline:none}
+input,select,textarea{font-family:inherit;padding:8px 11px;border:1px solid var(--bd);border-radius:8px;font-size:13px;background:var(--inp);color:var(--fg);outline:none;width:100%}
+textarea{font-family:'JetBrains Mono',ui-monospace,monospace;resize:vertical}
 input:focus,select:focus{border-color:var(--pri)}
 .mono{font-family:'JetBrains Mono',ui-monospace,monospace}
 /* login */
@@ -48,7 +50,7 @@ main{max-width:1180px;margin:0 auto;padding:22px}
 .acts button{padding:5px 10px;font-size:12px}
 table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--bd);border-radius:12px;overflow:hidden}
 th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--bd);font-size:13px}
-th{background:#f8fafc;color:var(--mut);font-weight:600}
+th{background:var(--hd);color:var(--mut);font-weight:600}
 tr:last-child td{border-bottom:none}
 .empty{text-align:center;color:var(--mut);padding:40px;background:#fff;border:1px dashed var(--bd);border-radius:12px}
 /* modal */
@@ -65,7 +67,24 @@ tr:last-child td{border-bottom:none}
 .stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px}
 .stat .box{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:16px}
 .stat .box .v{font-size:26px;font-weight:700}
+.stat .box .v.ok{color:var(--ok)}.stat .box .v.warn{color:var(--warn)}.stat .box .v.err{color:var(--err)}
 .stat .box .l{color:var(--mut);font-size:12px;margin-top:4px}
+.pill.err{background:#fee2e2;color:var(--err)}
+:root[data-theme=dark] .pill.ok{background:#14432a;color:var(--ok)}
+:root[data-theme=dark] .pill.off{background:#334155;color:var(--mut)}
+:root[data-theme=dark] .pill.cool{background:#422006;color:var(--warn)}
+:root[data-theme=dark] .pill.err{background:#450a0a;color:var(--err)}
+.sm{font-size:12px}
+h3.sec{font-size:14px;color:var(--mut);margin:18px 0 8px;font-weight:600}
+.hint{color:var(--mut);font-size:12px;margin:8px 0}
+.warn-txt{color:var(--warn);font-size:13px;margin:0 0 10px}
+.card.sel{border-color:var(--pri);box-shadow:0 0 0 2px rgba(59,130,246,.15)}
+.card .nm input[type=checkbox]{width:auto;margin-right:4px;cursor:pointer}
+.batchbar{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--pri);border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:13px}
+tr.clk{cursor:pointer}tr.clk:hover td{background:var(--hd)}
+.logbar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+.payload{max-height:60vh;overflow:auto;background:var(--hd);padding:12px;border-radius:8px;font-size:12px;font-family:'JetBrains Mono',ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
+#modal .box{max-width:640px}
 </style>
 </head>
 <body>
@@ -83,20 +102,41 @@ tr:last-child td{border-bottom:none}
   <header>
     <span class="logo">⚡ Cursor2API</span>
     <nav>
-      <button data-tab="accounts" class="on" onclick="switchTab('accounts')">账号池</button>
+      <button data-tab="overview" class="on" onclick="switchTab('overview')">概览</button>
+      <button data-tab="accounts" onclick="switchTab('accounts')">账号池</button>
       <button data-tab="keys" onclick="switchTab('keys')">客户端 Key</button>
+      <button data-tab="proxies" onclick="switchTab('proxies')">代理池</button>
       <button data-tab="groups" onclick="switchTab('groups')">分组</button>
-      <button data-tab="traces" onclick="switchTab('traces')">链路追踪</button>
-      <button data-tab="stats" onclick="switchTab('stats')">用量</button>
+      <button data-tab="logs" onclick="switchTab('logs')">日志</button>
+      <button data-tab="settings" onclick="switchTab('settings')">设置</button>
     </nav>
     <span class="sp"></span>
+    <button id="themeBtn" onclick="toggleTheme()" title="主题">🌙</button>
     <button onclick="logout()">退出</button>
   </header>
   <main>
-    <section class="tab on" id="tab-accounts">
+    <section class="tab on" id="tab-overview">
+      <div class="bar"><h2>概览</h2><span class="sp"></span>
+        <button onclick="loadOverview()">刷新</button>
+        <button class="pri" onclick="batchProbeAll()">全部探测</button>
+      </div>
+      <div id="overviewWrap"></div>
+    </section>
+    <section class="tab" id="tab-accounts">
       <div class="bar"><h2>账号池</h2><span class="sp"></span>
         <button onclick="reloadAll()">刷新</button>
+        <button onclick="openImportModal()">批量导入</button>
         <button class="pri" onclick="openAccountModal()">+ 新增账号</button>
+      </div>
+      <div id="batchBar" class="batchbar" style="display:none">
+        <span>已选 <b id="selCount">0</b> 个</span>
+        <button onclick="selectAll(true)">全选</button>
+        <button onclick="selectAll(false)">清空</button>
+        <span class="sp"></span>
+        <button onclick="batchProbe()">批量探测</button>
+        <button onclick="openBatchEdit()">批量编辑</button>
+        <button onclick="batchReset()">批量重置</button>
+        <button class="danger" onclick="batchDelete()">批量删除</button>
       </div>
       <div id="accountsWrap" class="grid"></div>
     </section>
@@ -106,22 +146,32 @@ tr:last-child td{border-bottom:none}
       </div>
       <div id="keysWrap"></div>
     </section>
+    <section class="tab" id="tab-proxies">
+      <div class="bar"><h2>代理池</h2><span class="sp"></span>
+        <button onclick="checkAllProxies()">检测全部</button>
+        <button onclick="assignRoundRobin()">轮询分配</button>
+        <button onclick="openProxyBatchModal()">批量添加</button>
+        <button class="pri" onclick="openProxyModal()">+ 新增代理</button>
+      </div>
+      <div id="proxiesWrap"></div>
+    </section>
     <section class="tab" id="tab-groups">
       <div class="bar"><h2>分组</h2><span class="sp"></span>
         <button class="pri" onclick="openGroupModal()">+ 新增分组</button>
       </div>
       <div id="groupsWrap"></div>
     </section>
-    <section class="tab" id="tab-traces">
-      <div class="bar"><h2>链路追踪</h2><span class="sp"></span>
-        <input id="traceFilter" placeholder="状态过滤，如 success / error" style="width:220px" />
-        <button onclick="loadTraces()">查询</button>
+    <section class="tab" id="tab-logs">
+      <div class="bar"><h2>日志</h2><span class="sp"></span>
+        <input id="logStatus" placeholder="状态 success/error/degraded" style="width:200px" />
+        <input id="logKeyword" placeholder="关键字（模型/标题/ID）" style="width:200px" />
+        <button onclick="applyLogFilter()">查询</button>
       </div>
-      <div id="tracesWrap"></div>
+      <div id="logsWrap"></div>
     </section>
-    <section class="tab" id="tab-stats">
-      <div class="bar"><h2>用量与池状态</h2><span class="sp"></span><button onclick="loadStats()">刷新</button></div>
-      <div id="statsWrap"></div>
+    <section class="tab" id="tab-settings">
+      <div class="bar"><h2>设置</h2></div>
+      <div id="settingsWrap" class="grid"></div>
     </section>
   </main>
 </div>
