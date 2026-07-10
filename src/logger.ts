@@ -17,6 +17,7 @@ import { EventEmitter } from 'events';
 import { existsSync, mkdirSync, appendFileSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'fs';
 import { join, basename } from 'path';
 import { getConfig, onConfigReload } from './config.js';
+import { getContext } from './request-context.js';
 import { initDb, closeDb, isDbInitialized, dbInsertRequest, dbGetPayload, dbGetSummaries, dbCountSummaries, dbGetSummaryCount, dbGetStatusCounts, dbGetSummariesSince, dbClear, dbGetStats } from './logger-db.js';
 
 // ==================== 类型定义 ====================
@@ -121,6 +122,10 @@ export interface RequestSummary {
     outputTokens?: number;  // 响应完成后的估算输出 token 数（js-tiktoken）
     /** 用户提问标题（截取最后一个 user 消息的前 80 字符） */
     title?: string;
+    /** P4 链路追踪：命中的下游 client key id（未鉴权/命中 authTokens 时为空） */
+    clientKeyId?: string;
+    /** P4 链路追踪：本请求最终使用的上游账号 id（无池/直连时为空） */
+    accountId?: string;
 }
 
 interface CompletionAssessment {
@@ -730,6 +735,7 @@ export function createRequestLogger(opts: {
     messageCount: number;
     apiFormat?: 'anthropic' | 'openai' | 'responses';
     systemPromptLength?: number;
+    clientKeyId?: string;
 }): RequestLogger {
     const requestId = shortId();
     const summary: RequestSummary = {
@@ -767,7 +773,7 @@ export function createRequestLogger(opts: {
     const fmtTag = summary.apiFormat === 'openai' ? ' [OAI]' : summary.apiFormat === 'responses' ? ' [RSP]' : '';
     console.log(`\x1b[36m⟶\x1b[0m [${requestId}] ${opts.method} ${opts.path}${fmtTag} | model=${opts.model} stream=${opts.stream}${toolInfo} msgs=${opts.messageCount}`);
     
-    return new RequestLogger(requestId, summary, payload);
+    return new RequestLogger(requestId, summary, payload, opts.clientKeyId);
 }
 
 export function getAllLogs(opts?: { requestId?: string; level?: LogLevel; source?: LogSource; limit?: number; since?: number }): LogEntry[] {
@@ -886,16 +892,29 @@ function addEntry(entry: LogEntry): void {
 
 // ==================== RequestLogger ====================
 
+/**
+ * 用量回调（P3）——由 index.ts 在启动时注入，避免 logger 直接依赖 keys 模块（防循环依赖）。
+ * complete() 成功收口时触发一次，把 clientKeyId + token 用量交给外部记账。
+ */
+type UsageSink = (clientKeyId: string, tokens: { inputTokens?: number; outputTokens?: number }) => void;
+let usageSink: UsageSink | null = null;
+export function setUsageSink(sink: UsageSink): void {
+    usageSink = sink;
+}
+
 export class RequestLogger {
     readonly requestId: string;
     private summary: RequestSummary;
     private payload: RequestPayload;
     private activePhase: PhaseTiming | null = null;
-    
-    constructor(requestId: string, summary: RequestSummary, payload: RequestPayload) {
+    /** 命中的下游 client key id（P3）；未命中/未启用 client key 时为空 */
+    private clientKeyId?: string;
+
+    constructor(requestId: string, summary: RequestSummary, payload: RequestPayload, clientKeyId?: string) {
         this.requestId = requestId;
         this.summary = summary;
         this.payload = payload;
+        this.clientKeyId = clientKeyId;
     }
     
     private log(level: LogLevel, source: LogSource, phase: LogPhase, message: string, details?: unknown): void {
@@ -1114,15 +1133,27 @@ export class RequestLogger {
         this.summary.issueTags = assessment.issueTags;
         this.summary.responseChars = responseChars;
         this.summary.stopReason = stopReason;
+        // ★ P4 链路追踪：回填下游 key 与最终命中账号
+        const ctx = getContext();
+        if (this.clientKeyId) this.summary.clientKeyId = this.clientKeyId;
+        if (ctx?.accountId) this.summary.accountId = ctx.accountId;
         const completionMessage = assessment.status === 'degraded'
             ? `降级完成 (${duration}ms, ${responseChars} chars, stop=${stopReason})${assessment.statusReason ? ` - ${assessment.statusReason}` : ''}`
             : `完成 (${duration}ms, ${responseChars} chars, stop=${stopReason})`;
         this.log(assessment.status === 'degraded' ? 'warn' : 'info', 'System', 'complete', completionMessage);
         logEmitter.emit('summary', this.summary);
-        
+
         // ★ 持久化到文件
         persistRequest(this.summary, this.payload);
-        
+
+        // ★ P3：记一次下游 client key 用量（仅命中 client key 时）
+        if (this.clientKeyId && usageSink) {
+            usageSink(this.clientKeyId, {
+                inputTokens: this.summary.inputTokens,
+                outputTokens: this.summary.outputTokens,
+            });
+        }
+
         const retryInfo = this.summary.retryCount > 0 ? ` retry=${this.summary.retryCount}` : '';
         const contInfo = this.summary.continuationCount > 0 ? ` cont=${this.summary.continuationCount}` : '';
         const toolInfo = this.summary.toolCallsDetected > 0 ? ` tools_called=${this.summary.toolCallsDetected}` : '';

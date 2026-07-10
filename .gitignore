@@ -34,6 +34,14 @@ build/
 # Config (contains sensitive tokens, use config.yaml.example as template)
 config.yaml
 
+# Account pool (contains cookies/proxies — secrets, never commit) and client keys
+accounts.json
+accounts.json.tmp
+client-keys.json
+client-keys.json.tmp
+groups.json
+groups.json.tmp
+
 # Database
 *.db
 

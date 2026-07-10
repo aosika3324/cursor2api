@@ -432,6 +432,7 @@ export async function handleOpenAIChatCompletions(req: Request, res: Response): 
         toolCount: body.tools?.length ?? 0,
         messageCount: body.messages?.length ?? 0,
         apiFormat: 'openai',
+        clientKeyId: (req as unknown as { clientKeyId?: string }).clientKeyId,
     });
 
     log.startPhase('receive', '接收请求');
@@ -1350,6 +1351,7 @@ export async function handleOpenAIResponses(req: Request, res: Response): Promis
         toolCount: chatBody.tools?.length ?? 0,
         messageCount: chatBody.messages?.length ?? 0,
         apiFormat: 'responses',
+        clientKeyId: (req as unknown as { clientKeyId?: string }).clientKeyId,
     });
     log.startPhase('receive', '接收请求');
     log.recordOriginalRequest(body);

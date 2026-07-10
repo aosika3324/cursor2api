@@ -118,6 +118,17 @@ function parseYamlConfig(defaults: AppConfig): { config: AppConfig; raw: Record<
         if (typeof yaml.context_pressure === 'number') {
             result.contextPressure = yaml.context_pressure;
         }
+        // ★ 账号池 / 调度（P2）
+        if (yaml.load_balancing_mode === 'priority' || yaml.load_balancing_mode === 'balanced') {
+            result.loadBalancingMode = yaml.load_balancing_mode;
+        }
+        if (typeof yaml.account_max_concurrency === 'number') result.accountMaxConcurrency = yaml.account_max_concurrency;
+        if (typeof yaml.account_cooldown_secs === 'number') result.accountCooldownSecs = yaml.account_cooldown_secs;
+        if (typeof yaml.account_failure_cooldown_secs === 'number') result.accountFailureCooldownSecs = yaml.account_failure_cooldown_secs;
+        if (typeof yaml.account_failure_threshold === 'number') result.accountFailureThreshold = yaml.account_failure_threshold;
+        if (typeof yaml.max_account_failover === 'number') result.maxAccountFailover = yaml.max_account_failover;
+        // ★ Admin API 密钥（P5）
+        if (yaml.admin_api_key) result.adminApiKey = String(yaml.admin_api_key);
     } catch (e) {
         console.warn('[Config] 读取 config.yaml 失败:', e);
     }
@@ -216,6 +227,15 @@ function applyEnvOverrides(cfg: AppConfig): void {
     if (process.env.CURSOR_COOKIE) cfg.cookie = process.env.CURSOR_COOKIE;
     // Stealth 代理环境变量覆盖
     if (process.env.STEALTH_PROXY) cfg.stealthProxy = process.env.STEALTH_PROXY;
+    // 账号池 / 调度环境变量覆盖（P2）
+    if (process.env.LOAD_BALANCING_MODE === 'priority' || process.env.LOAD_BALANCING_MODE === 'balanced') {
+        cfg.loadBalancingMode = process.env.LOAD_BALANCING_MODE;
+    }
+    if (process.env.ACCOUNT_MAX_CONCURRENCY) cfg.accountMaxConcurrency = parseInt(process.env.ACCOUNT_MAX_CONCURRENCY);
+    if (process.env.ACCOUNT_COOLDOWN_SECS) cfg.accountCooldownSecs = parseInt(process.env.ACCOUNT_COOLDOWN_SECS);
+    if (process.env.MAX_ACCOUNT_FAILOVER) cfg.maxAccountFailover = parseInt(process.env.MAX_ACCOUNT_FAILOVER);
+    // Admin API 密钥环境变量覆盖（P5）
+    if (process.env.ADMIN_API_KEY) cfg.adminApiKey = process.env.ADMIN_API_KEY;
     // 从 base64 FP 环境变量解析指纹
     if (process.env.FP) {
         try {

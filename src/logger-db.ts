@@ -40,10 +40,21 @@ export function initDb(dbPath: string): void {
             request_id   TEXT PRIMARY KEY,
             timestamp    INTEGER NOT NULL,
             summary_json TEXT NOT NULL,
-            payload_json TEXT
+            payload_json TEXT,
+            account_id    TEXT,
+            client_key_id TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_timestamp ON requests(timestamp);
     `);
+
+    // ★ P4 迁移：为既有库补齐链路追踪列（旧库无这两列，ADD COLUMN 幂等失败即忽略）
+    for (const col of ['account_id', 'client_key_id']) {
+        try {
+            db.exec(`ALTER TABLE requests ADD COLUMN ${col} TEXT`);
+        } catch { /* 列已存在，忽略 */ }
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_account_id ON requests(account_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_client_key_id ON requests(client_key_id)');
 }
 
 function getDb(): InstanceType<typeof Database> {
@@ -55,13 +66,15 @@ function getDb(): InstanceType<typeof Database> {
 
 export function dbInsertRequest(summary: DbRequestSummary, payload: DbRequestPayload): void {
     const stmt = getDb().prepare(
-        'INSERT OR REPLACE INTO requests (request_id, timestamp, summary_json, payload_json) VALUES (?, ?, ?, ?)'
+        'INSERT OR REPLACE INTO requests (request_id, timestamp, summary_json, payload_json, account_id, client_key_id) VALUES (?, ?, ?, ?, ?, ?)'
     );
     stmt.run(
         summary.requestId,
         summary.startTime,
         JSON.stringify(summary),
-        JSON.stringify(payload)
+        JSON.stringify(payload),
+        summary.accountId ?? null,
+        summary.clientKeyId ?? null
     );
 }
 
@@ -82,6 +95,8 @@ export interface DbQueryOpts {
     since?: number;     // timestamp >= since（时间范围）
     status?: string;    // 精确匹配 summary.status
     keyword?: string;   // 模糊匹配 title/model/request_id
+    accountId?: string;    // P5 链路追踪：按上游账号过滤（走 account_id 列 + 索引）
+    clientKeyId?: string;  // P5 链路追踪：按下游 key 过滤（走 client_key_id 列 + 索引）
 }
 
 /** 动态构建 WHERE 子句（参数化，防注入） */
@@ -103,6 +118,14 @@ function buildWhere(opts: Omit<DbQueryOpts, 'limit'>): { where: string; params: 
     if (opts.keyword) {
         conditions.push("(request_id LIKE :kw OR json_extract(summary_json,'$.title') LIKE :kw OR json_extract(summary_json,'$.model') LIKE :kw)");
         params.kw = `%${opts.keyword}%`;
+    }
+    if (opts.accountId) {
+        conditions.push('account_id = :accountId');
+        params.accountId = opts.accountId;
+    }
+    if (opts.clientKeyId) {
+        conditions.push('client_key_id = :clientKeyId');
+        params.clientKeyId = opts.clientKeyId;
     }
     const where = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
     return { where, params };

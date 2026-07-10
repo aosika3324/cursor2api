@@ -14,6 +14,25 @@ import { getConfig } from './config.js';
 
 let cachedAgent: ProxyAgent | undefined;
 let cachedVisionAgent: ProxyAgent | undefined;
+/** 按 proxy URL 缓存的 per-account dispatcher（避免每请求重建 ProxyAgent） */
+const perProxyAgents = new Map<string, ProxyAgent>();
+
+/**
+ * 为指定 proxy URL 获取（或复用）dispatcher。
+ * 传入 undefined/空串时回退到全局 proxy 行为（getProxyFetchOptions）。
+ * 供账号池：每个账号可绑定各自出口代理，避免共用 IP 被 Cursor 级联限流。
+ */
+export function getProxyFetchOptionsFor(proxyUrl?: string): Record<string, unknown> {
+    const url = proxyUrl?.trim();
+    if (!url) return getProxyFetchOptions();
+    let agent = perProxyAgents.get(url);
+    if (!agent) {
+        console.log(`[Proxy] 账号专用代理: ${url}`);
+        agent = new ProxyAgent(url);
+        perProxyAgents.set(url, agent);
+    }
+    return { dispatcher: agent };
+}
 
 /**
  * 获取代理 dispatcher（如果配置了 proxy）

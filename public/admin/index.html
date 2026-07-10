@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cursor2API · 管理后台</title>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--bd:#e2e8f0;--fg:#1e293b;--mut:#64748b;--pri:#3b82f6;--ok:#16a34a;--warn:#d97706;--err:#dc2626}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:var(--bg);color:var(--fg);font-size:14px}
+button{font-family:inherit;cursor:pointer;border:1px solid var(--bd);background:#fff;border-radius:8px;padding:7px 13px;font-size:13px;color:var(--fg);transition:all .15s}
+button:hover{border-color:var(--pri);color:var(--pri)}
+button.pri{background:var(--pri);color:#fff;border-color:var(--pri)}
+button.pri:hover{opacity:.9;color:#fff}
+button.danger{color:var(--err);border-color:#fecaca}
+button.danger:hover{background:var(--err);color:#fff;border-color:var(--err)}
+input,select{font-family:inherit;padding:8px 11px;border:1px solid var(--bd);border-radius:8px;font-size:13px;background:#fff;color:var(--fg);outline:none}
+input:focus,select:focus{border-color:var(--pri)}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+/* login */
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+#login .box{background:#fff;padding:32px;border-radius:16px;border:1px solid var(--bd);width:340px;box-shadow:0 10px 40px rgba(0,0,0,.06)}
+#login h1{margin:0 0 6px;font-size:19px}
+#login p{margin:0 0 18px;color:var(--mut);font-size:13px}
+#login input{width:100%;margin-bottom:12px}
+#login button{width:100%}
+#login .err{color:var(--err);font-size:12px;margin-top:10px;min-height:16px}
+/* layout */
+header{background:#fff;border-bottom:1px solid var(--bd);padding:0 22px;display:flex;align-items:center;gap:18px;height:56px;position:sticky;top:0;z-index:10}
+header .logo{font-weight:700;font-size:16px}
+header .sp{flex:1}
+nav{display:flex;gap:4px}
+nav button{border:none;background:none;padding:8px 14px;border-radius:8px;color:var(--mut);font-size:14px}
+nav button.on{background:#eff6ff;color:var(--pri);font-weight:600}
+main{max-width:1180px;margin:0 auto;padding:22px}
+.tab{display:none}.tab.on{display:block}
+.bar{display:flex;align-items:center;gap:10px;margin-bottom:16px}
+.bar h2{margin:0;font-size:17px}.bar .sp{flex:1}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px}
+.card .row{display:flex;justify-content:space-between;gap:8px;margin:5px 0;font-size:13px}
+.card .row .k{color:var(--mut)}
+.card .nm{font-weight:600;font-size:15px;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.pill{font-size:11px;padding:2px 8px;border-radius:20px;font-weight:600}
+.pill.ok{background:#dcfce7;color:var(--ok)}.pill.off{background:#f1f5f9;color:var(--mut)}
+.pill.cool{background:#fef3c7;color:var(--warn)}
+.acts{display:flex;gap:6px;margin-top:12px;flex-wrap:wrap}
+.acts button{padding:5px 10px;font-size:12px}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--bd);border-radius:12px;overflow:hidden}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--bd);font-size:13px}
+th{background:#f8fafc;color:var(--mut);font-weight:600}
+tr:last-child td{border-bottom:none}
+.empty{text-align:center;color:var(--mut);padding:40px;background:#fff;border:1px dashed var(--bd);border-radius:12px}
+/* modal */
+#modal{position:fixed;inset:0;background:rgba(15,23,42,.4);display:none;align-items:center;justify-content:center;z-index:50}
+#modal.on{display:flex}
+#modal .box{background:#fff;border-radius:14px;padding:24px;width:420px;max-width:92vw}
+#modal h3{margin:0 0 16px;font-size:17px}
+#modal label{display:block;font-size:12px;color:var(--mut);margin:10px 0 4px}
+#modal input,#modal select{width:100%}
+#modal .mbtns{display:flex;gap:8px;justify-content:flex-end;margin-top:20px}
+#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#1e293b;color:#fff;padding:11px 20px;border-radius:10px;font-size:13px;opacity:0;transition:opacity .25s;pointer-events:none;z-index:99}
+#toast.on{opacity:1}
+#toast.err{background:var(--err)}
+.stat{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:18px}
+.stat .box{background:#fff;border:1px solid var(--bd);border-radius:12px;padding:16px}
+.stat .box .v{font-size:26px;font-weight:700}
+.stat .box .l{color:var(--mut);font-size:12px;margin-top:4px}
+</style>
+</head>
+<body>
+<div id="login">
+  <div class="box">
+    <h1>管理后台</h1>
+    <p>输入 Admin API Key 登录</p>
+    <input type="password" id="adminKeyIn" class="mono" placeholder="admin_api_key..." autofocus />
+    <button class="pri" onclick="doLogin()">登录</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <span class="logo">⚡ Cursor2API</span>
+    <nav>
+      <button data-tab="accounts" class="on" onclick="switchTab('accounts')">账号池</button>
+      <button data-tab="keys" onclick="switchTab('keys')">客户端 Key</button>
+      <button data-tab="groups" onclick="switchTab('groups')">分组</button>
+      <button data-tab="traces" onclick="switchTab('traces')">链路追踪</button>
+      <button data-tab="stats" onclick="switchTab('stats')">用量</button>
+    </nav>
+    <span class="sp"></span>
+    <button onclick="logout()">退出</button>
+  </header>
+  <main>
+    <section class="tab on" id="tab-accounts">
+      <div class="bar"><h2>账号池</h2><span class="sp"></span>
+        <button onclick="reloadAll()">刷新</button>
+        <button class="pri" onclick="openAccountModal()">+ 新增账号</button>
+      </div>
+      <div id="accountsWrap" class="grid"></div>
+    </section>
+    <section class="tab" id="tab-keys">
+      <div class="bar"><h2>客户端 Key</h2><span class="sp"></span>
+        <button class="pri" onclick="openKeyModal()">+ 新增 Key</button>
+      </div>
+      <div id="keysWrap"></div>
+    </section>
+    <section class="tab" id="tab-groups">
+      <div class="bar"><h2>分组</h2><span class="sp"></span>
+        <button class="pri" onclick="openGroupModal()">+ 新增分组</button>
+      </div>
+      <div id="groupsWrap"></div>
+    </section>
+    <section class="tab" id="tab-traces">
+      <div class="bar"><h2>链路追踪</h2><span class="sp"></span>
+        <input id="traceFilter" placeholder="状态过滤，如 success / error" style="width:220px" />
+        <button onclick="loadTraces()">查询</button>
+      </div>
+      <div id="tracesWrap"></div>
+    </section>
+    <section class="tab" id="tab-stats">
+      <div class="bar"><h2>用量与池状态</h2><span class="sp"></span><button onclick="loadStats()">刷新</button></div>
+      <div id="statsWrap"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal">
+  <div class="box">
+    <h3 id="modalTitle"></h3>
+    <div id="modalBody"></div>
+    <div class="mbtns">
+      <button onclick="closeModal()">取消</button>
+      <button class="pri" id="modalOk" onclick="modalSubmit()">确定</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+<script src="/public/admin/app.js"></script>
+</body>
+</html>

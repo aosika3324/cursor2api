@@ -7,14 +7,20 @@
 
 import 'dotenv/config';
 import { createRequire } from 'module';
+import { join } from 'path';
 import express from 'express';
 import { getConfig, initConfigWatcher, stopConfigWatcher } from './config.js';
 import { handleMessages, listModels, countTokens } from './handler.js';
 import { handleOpenAIChatCompletions, handleOpenAIResponses } from './openai-handler.js';
 import { serveLogViewer, apiGetLogs, apiGetRequests, apiGetStats, apiGetVueStats, apiGetPayload, apiLogsStream, serveLogViewerLogin, apiClearLogs, serveVueApp, apiGetRequestsMore } from './log-viewer.js';
 import { apiGetConfig, apiSaveConfig } from './config-api.js';
-import { loadLogsFromFiles } from './logger.js';
+import { loadLogsFromFiles, setUsageSink } from './logger.js';
 import { initDb } from './logger-db.js';
+import { loadAccounts, accountCount } from './accounts/account.js';
+import { loadClientKeys, clientKeyCount, findByKey, recordUsage } from './keys/client-key.js';
+import { runWithContext } from './request-context.js';
+import { loadGroups, groupCount } from './groups/group.js';
+import { createAdminRouter } from './admin/admin-api.js';
 
 // 从 package.json 读取版本号，统一来源，避免多处硬编码
 const require = createRequire(import.meta.url);
@@ -68,6 +74,11 @@ const logViewerAuth = (req: express.Request, res: express.Response, next: expres
 app.get('/logs', logViewerAuth, serveLogViewer);
 // Vue3 日志 UI（无服务端鉴权，由 Vue 应用内部处理）
 app.get('/vuelogs', serveVueApp);
+// ★ Admin 管理前端（P6）：静态单页，鉴权由页面内 admin_api_key + /api/admin/* 保证
+app.get('/admin', (_req, res) => {
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.sendFile(join(process.cwd(), 'public', 'admin', 'index.html'));
+});
 app.get('/api/logs', logViewerAuth, apiGetLogs);
 app.get('/api/requests/more', logViewerAuth, apiGetRequestsMore);
 app.get('/api/requests', logViewerAuth, apiGetRequests);
@@ -79,28 +90,48 @@ app.post('/api/logs/clear', logViewerAuth, apiClearLogs);
 app.get('/api/config', logViewerAuth, apiGetConfig);
 app.post('/api/config', logViewerAuth, apiSaveConfig);
 
-// ★ API 鉴权中间件：配置了 authTokens 则需要 Bearer token
+// ★ Admin REST API（P5）：独立 admin_api_key 鉴权，挂在业务鉴权之前
+app.use('/api/admin', createAdminRouter());
+
+// ★ API 鉴权中间件（P3：authTokens 与 client key 共存）
+//   - 都未配置 → 全部放行（与改造前一致）
+//   - 命中 authTokens → 放行，不记用量（老配置零回归）
+//   - 命中 client key → 放行，并把 clientKeyId 挂到 req 供用量统计
+//   - 都不命中 → 拒绝
 app.use((req, res, next) => {
     // 跳过无需鉴权的路径
     if (req.method === 'GET' || req.path === '/health') {
         return next();
     }
     const tokens = getConfig().authTokens;
-    if (!tokens || tokens.length === 0) {
-        return next(); // 未配置 token 则全部放行
+    const hasTokens = !!tokens && tokens.length > 0;
+    const hasClientKeys = clientKeyCount() > 0;
+
+    // 未配置任何凭据 → 全部放行（仍进上下文，便于链路追踪账号）
+    if (!hasTokens && !hasClientKeys) {
+        return runWithContext({}, () => next());
     }
+
     const authHeader = req.headers['authorization'] || req.headers['x-api-key'];
     if (!authHeader) {
         res.status(401).json({ error: { message: 'Missing authentication token. Use Authorization: Bearer <token>', type: 'auth_error' } });
         return;
     }
     const token = String(authHeader).replace(/^Bearer\s+/i, '').trim();
-    if (!tokens.includes(token)) {
-        console.log(`[Auth] 拒绝无效 token: ${token.substring(0, 8)}...`);
-        res.status(403).json({ error: { message: 'Invalid authentication token', type: 'auth_error' } });
-        return;
+
+    // 1) 静态 authTokens（老机制，不记用量、不分组）
+    if (hasTokens && tokens!.includes(token)) {
+        return runWithContext({}, () => next());
     }
-    next();
+    // 2) 下游 client key（记用量 + 分组隔离路由）
+    const ck = findByKey(token);
+    if (ck) {
+        (req as unknown as { clientKeyId?: string }).clientKeyId = ck.id;
+        return runWithContext({ clientKeyId: ck.id, group: ck.group }, () => next());
+    }
+
+    console.log(`[Auth] 拒绝无效 token: ${token.substring(0, 8)}...`);
+    res.status(403).json({ error: { message: 'Invalid authentication token', type: 'auth_error' } });
 });
 
 // ==================== 路由 ====================
@@ -143,6 +174,7 @@ app.get('/', (_req, res) => {
             health: 'GET /health',
             log_viewer: 'GET /logs',
             log_viewer_vue: 'GET /vuelogs',
+            admin_panel: 'GET /admin',
         },
         usage: {
             claude_code: 'export ANTHROPIC_BASE_URL=http://localhost:' + config.port,
@@ -161,6 +193,16 @@ if (config.logging?.db_enabled) {
 
 // ★ 从日志文件加载历史（必须在 listen 之前）
 loadLogsFromFiles();
+
+// ★ 加载账号池（含首启迁移 config.cookie → accounts.json）
+loadAccounts();
+
+// ★ 加载下游 client key，并注册用量回调（P3）
+loadClientKeys();
+setUsageSink(recordUsage);
+
+// ★ 加载账号分组（P4）
+loadGroups();
 
 app.listen(config.port, () => {
     const auth = config.authTokens?.length ? `${config.authTokens.length} token(s)` : 'open';
@@ -192,10 +234,17 @@ app.listen(config.port, () => {
     console.log(`  ├─ Server:  \x1b[32mhttp://localhost:${config.port}\x1b[0m`);
     console.log(`  ├─ Model:   ${config.cursorModel}`);
     console.log(`  ├─ Auth:    ${auth}`);
+    const poolMode = config.loadBalancingMode ?? 'priority';
+    const poolInfo = accountCount() > 0 ? `${accountCount()} 账号 (${poolMode})` : '\x1b[33m空 (回退全局 config)\x1b[0m';
+    console.log(`  ├─ Pool:    ${poolInfo}`);
+    const keyInfo = clientKeyCount() > 0 ? `${clientKeyCount()} client key(s)` : '未配置';
+    console.log(`  ├─ Keys:    ${keyInfo}`);
+    if (groupCount() > 0) console.log(`  ├─ Groups:  ${groupCount()} 组`);
     console.log(`  ├─ Tools:   ${toolsInfo}`);
     console.log(`  ├─ Logging: ${logPersist}`);
     console.log(`  └─ Logs:    \x1b[35mhttp://localhost:${config.port}/logs\x1b[0m`);
     console.log(`  └─ Logs Vue3: \x1b[35mhttp://localhost:${config.port}/vuelogs\x1b[0m`);
+    if (getConfig().adminApiKey) console.log(`  └─ Admin:   \x1b[35mhttp://localhost:${config.port}/admin\x1b[0m`);
     console.log('');
 
     // ★ 启动 config.yaml 热重载监听

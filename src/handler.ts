@@ -355,6 +355,7 @@ export async function handleMessages(req: Request, res: Response): Promise<void>
         messageCount: body.messages?.length ?? 0,
         apiFormat: 'anthropic',
         systemPromptLength: systemStr.length,
+        clientKeyId: (req as unknown as { clientKeyId?: string }).clientKeyId,
     });
 
     log.startPhase('receive', '接收请求');

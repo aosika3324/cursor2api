@@ -280,3 +280,30 @@ logging:
   db_enabled: false
   # SQLite 文件路径（确保 logs 目录已挂载，Docker 下同 dir 目录）
   db_path: "./logs/cursor2api.db"
+
+# ============================================================
+# 账号池 / 调度（多账号）
+# ============================================================
+# 账号本身存放在 accounts.json（不在此文件），可用 Admin API/UI 管理。
+# 首次启动时，若 accounts.json 不存在且此处配了 cookie，会自动迁移为第一条账号。
+# 下面仅为「调度策略」的全局参数：
+#
+# 选号策略: priority=按 priority 升序(同级取最空闲) | balanced=负载均衡(P2C)
+# load_balancing_mode: priority
+# 单账号并发上限（超过则该账号暂不参与调度，换其它账号）
+# account_max_concurrency: 2
+# 命中 429/403 限流后的冷却时长（秒）
+# account_cooldown_secs: 1800
+# 连续失败多少次触发临时冷却
+# account_failure_threshold: 3
+# 临时冷却时长（秒）
+# account_failure_cooldown_secs: 60
+# 单个请求最多跨几个账号做故障转移（上限=账号数）
+# max_account_failover: 3
+
+# ============================================================
+# Admin 管理 API（P5）
+# ============================================================
+# 配置后启用 /api/admin/*，请求需带 header: Authorization: Bearer <admin_api_key>
+# 留空则 Admin API 完全禁用。环境变量: ADMIN_API_KEY
+# admin_api_key: ""

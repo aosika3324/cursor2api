@@ -101,6 +101,92 @@ export interface CursorSSEEvent {
     };
 }
 
+// ==================== Account Pool Types ====================
+
+/**
+ * CursorAccount - 上游账号池的一个条目
+ *
+ * cursor2api 上游是匿名的 cursor.com 文档页 AI，无 OAuth。一个「账号」= 一份能通过
+ * Vercel bot challenge 的凭据元组：cookie(_vcrcs) + 指纹(UA) + 可选的独立出口代理。
+ * cookie 若共用同一出口 IP 会被 Cursor 按 IP 一起限流，故每账号可绑定各自 proxy。
+ *
+ * 连接字段（cookie/fingerprintUA/proxy/stealthProxyUrl）在 P1 被 cursor-client 使用；
+ * 调度/统计字段（priority/disabled/cooldownUntil/...）在 P2 被调度器使用。
+ */
+export interface CursorAccount {
+    id: string;
+    name: string;
+    /** Cursor 请求携带的 Cookie（通过 Vercel 安全验证的核心凭据） */
+    cookie: string;
+    /** 该账号专用的浏览器指纹 UA（留空则回退全局 fingerprint.userAgent） */
+    fingerprintUA?: string;
+    /** 该账号专用出口代理（留空则回退全局 proxy）；建议每账号独立以避免 IP 级联限流 */
+    proxy?: string;
+    /** 该账号走的 stealth 代理地址（留空则回退全局 stealthProxy） */
+    stealthProxyUrl?: string;
+
+    // —— 调度/状态字段（P2）——
+    priority: number;          // 越小越优先，默认 0
+    disabled: boolean;
+    group?: string;            // 所属分组（供客户端 Key 分组隔离）
+    maxConcurrency?: number;   // 单账号并发上限（留空取全局默认）
+
+    // —— 运行时统计（持久化）——
+    createdAt: string;
+    lastUsedAt?: string;
+    totalCalls: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    /** 连续失败次数（成功即清零，供临时冷却判定） */
+    consecutiveFailures: number;
+    /** 冷却截止时间（RFC3339）；now < cooldownUntil 时不参与调度 */
+    cooldownUntil?: string;
+    /** 最近一次被自动禁用/冷却的原因（排障用） */
+    lastErrorReason?: string;
+}
+
+/**
+ * 连接所需的账号子集 —— cursor-client 只关心「怎么连上游」这几项。
+ * P1 中若调用方不传 account，则由全局 config 合成一个此形状的对象，行为与改造前一致。
+ */
+export interface AccountConnection {
+    cookie?: string;
+    fingerprintUA?: string;
+    proxy?: string;
+    stealthProxyUrl?: string;
+}
+
+/**
+ * 下游客户端 Key（P3）—— 分发给调用方的凭据（csk_ 前缀），与上游 CursorAccount 解耦。
+ * 与 config.authTokens 共存：两者都能通过鉴权，但只有 client key 命中时才记用量。
+ */
+export interface ClientKey {
+    id: string;
+    /** 实际密钥串，形如 csk_xxxxxxxx */
+    key: string;
+    name: string;
+    disabled: boolean;
+    /** 分组（P4：限定该 key 只能路由到同组账号；P3 仅存储不生效） */
+    group?: string;
+
+    // —— 运行时统计（持久化）——
+    createdAt: string;
+    lastUsedAt?: string;
+    totalCalls: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+}
+
+/**
+ * 账号分组（P4）—— 「客户端 Key ↔ 上游账号」的隔离边界。
+ * 账号与 client key 以 group **名字** 引用分组，故改名需级联。
+ */
+export interface Group {
+    id: string;
+    name: string;
+    createdAt: string;
+}
+
 // ==================== Internal Types ====================
 
 export interface ParsedToolCall {
@@ -161,4 +247,12 @@ export interface AppConfig {
     fingerprint: {
         userAgent: string;
     };
+    // —— 账号池 / 调度（P2）——
+    loadBalancingMode?: 'priority' | 'balanced';  // 选号策略，默认 'priority'
+    accountMaxConcurrency?: number;               // 单账号并发上限，默认 2
+    accountCooldownSecs?: number;                 // 429/403 限流冷却时长(秒)，默认 1800
+    accountFailureCooldownSecs?: number;          // 连续失败达阈值后的临时冷却(秒)，默认 60
+    accountFailureThreshold?: number;             // 连续失败多少次触发临时冷却，默认 3
+    maxAccountFailover?: number;                  // 单请求最多跨几个账号故障转移，默认 3（上限=账号数）
+    adminApiKey?: string;                          // Admin API 鉴权密钥（空=禁用 Admin，P5）
 }
